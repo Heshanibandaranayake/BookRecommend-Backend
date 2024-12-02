@@ -88,33 +88,33 @@ app.post("/api/auth/signup", async (req, res) => {
     }
   });
 
-  app.get("/api/books/recommendations", (req, res) => {
-    const books = [
-      {
-        id: 1,
-        title: "The Great Gatsby",
-        author: "F. Scott Fitzgerald",
-        description: "A novel set in the 1920s, exploring themes of wealth and society.",
-        coverImage: "https://example.com/images/gatsby.jpg",
-      },
-      {
-        id: 2,
-        title: "To Kill a Mockingbird",
-        author: "Harper Lee",
-        description: "A powerful story about racial injustice in the American South.",
-        coverImage: "https://example.com/images/mockingbird.jpg",
-      },
-      {
-        id: 3,
-        title: "1984",
-        author: "George Orwell",
-        description: "A dystopian novel about totalitarian government surveillance and control.",
-        coverImage: "https://example.com/images/1984.jpg",
-      },
-    ];
+  // app.get("/api/books/recommendations", (req, res) => {
+  //   const books = [
+  //     {
+  //       id: 1,
+  //       title: "The Great Gatsby",
+  //       author: "F. Scott Fitzgerald",
+  //       description: "A novel set in the 1920s, exploring themes of wealth and society.",
+  //       covermage: "https://example.com/images/gatsby.jpg",
+  //     },
+  //     {
+  //       id: 2,
+  //       title: "To Kill a Mockingbird",
+  //       author: "Harper Lee",
+  //       description: "A powerful story about racial injustice in the American South.",
+  //       coverImage: "https://example.com/images/mockingbird.jpg",
+  //     },
+  //     {
+  //       id: 3,
+  //       title: "1984",
+  //       author: "George Orwell",
+  //       description: "A dystopian novel about totalitarian government surveillance and control.",
+  //       coverImage: "https://example.com/images/1984.jpg",
+  //     },
+  //   ];
   
-    return res.status(200).json(books);
-  });
+  //   return res.status(200).json(books);
+  // });
   
   // Get user's library books
 app.get("/api/user-library/:userId", (req, res) => {
@@ -132,17 +132,23 @@ app.get("/api/user-library/:userId", (req, res) => {
         console.error("Error fetching user library books:", err);
         return res.status(500).json({ message: "Database error" });
       }
-      res.json(results);
+      const response = results.map(book => {
+        const coverImage = book.cover_image ? `data:image/jpeg;base64,${book.cover_image.toString('base64')}` : null;
+        return {
+          ...book,
+          cover_image: coverImage
+        };
+      });
+      res.json(response);
     });
   });
 
   // Search books based on query parameters
 app.get('/api/search-books', (req, res) => {
-    // Get the search parameters from query string
+
     const { title, author, category } = req.query;
   
-    // Build the SQL query with optional filters
-    let sql = 'SELECT * FROM books WHERE 1=1'; // Base query
+    let sql = 'SELECT * FROM books WHERE 1=1'; 
   
     const params = [];
   
@@ -161,19 +167,57 @@ app.get('/api/search-books', (req, res) => {
       params.push(`%${category}%`);
     }
   
-    // Execute the query with dynamic filters
     db.query(sql, params, (err, results) => {
       if (err) {
         console.error('Error executing search query:', err);
         return res.status(500).json({ message: 'Database error' });
       }
-      res.json(results);
+      const response = results.map(book => {
+        console.log("book item",book);
+        const coverImage = book.cover_image ? `data:image/jpeg;base64,${book.cover_image.toString('base64')}` : null;
+        return {
+          ...book,
+          cover_image: coverImage
+        };
+      });
+      res.json(response);
     });
   });
+
+app.post('/api/add-to-library/:userId', (req, res) => {
+    const { bookId } = req.body;
+    const userId =req.params.userId;  
   
+    const sql = 'INSERT INTO user_library (user_id, book_id) VALUES (?, ?)';
+    db.query(sql, [userId, bookId], (err, result) => {
+      if (err) {
+        console.error('Error adding book to library:', err);
+        return res.status(500).json({ message: 'Error adding book to library' });
+      }
+      res.json({ message: 'Book added to your library' });
+    });
+  });
+  app.get('/api/recommendations', async (req, res) => {
+    const query = req.query.query;
   
-  // Start the Server
+    if (!query) {
+      return res.status(400).json({ message: 'Query parameter is required' });
+    }
+  
+    try {
+      const response = await axios.get(`http://localhost:4000/recommendations?query=${query}`);
+  
+      res.json(response);
+    } catch (err) {
+      console.error('Error fetching recommendations:', err);
+      res.status(500).json({ message: 'Database error' });
+    }
+  });
+  
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  
+  
