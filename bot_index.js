@@ -2,12 +2,21 @@ require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const express = require('express');
 const mysql = require('mysql2/promise');
+const axios = require('axios');
+
+const TOKEN = process.env.DISCORD_BOT_TOKEN;
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent, 
+    GatewayIntentBits.GuildMembers 
+  ],
 });
 
 const app = express();
+app.use(express.json());
 const PORT = process.env.BOT_API_PORT || 4000;
 
 // Database connection
@@ -25,70 +34,38 @@ client.once('ready', () => {
 
 client.login(process.env.DISCORD_BOT_TOKEN);
 
-// Bot responds to Discord commands
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+app.post('/bot/post-message', async(req, res) => {
+  // console.log("bot req***",req.body);
+  // console.log('Headers:', req.headers);
+  // console.log('Body:', req.body); // This should print the JSON object
+  //res.status(200).json({ success: true });
+  const channelId = req.body.channelId;
+  const message = req.body.message;
 
-  if (message.content.startsWith('!recommend')) {
-    const query = message.content.replace('!recommend', '').trim();
-
-    if (!query) {
-      return message.channel.send('Please provide a keyword or genre for recommendations, e.g., `!recommend fantasy`.');
-    }
-
-    try {
-      const [results] = await db.execute(
-        `SELECT title, author 
-         FROM books 
-         WHERE title LIKE ? OR author LIKE ? OR category LIKE ?
-         LIMIT 10`,
-        [`%${query}%`, `%${query}%`, `%${query}%`]
-      );
-
-      if (results.length === 0) {
-        return message.channel.send(`No recommendations found for "${query}". Try another keyword or genre.`);
-      }
-
-      const recommendationList = results
-        .map((book, index) => `${index + 1}. **${book.title}** by ${book.author}`)
-        .join('\n');
-
-      message.channel.send(`Here are some recommendations for "${query}":\n${recommendationList}`);
-    } catch (error) {
-      console.error('Error fetching recommendations:', error);
-      message.channel.send('There was an error retrieving recommendations. Please try again later.');
-    }
-  }
-});
-
-// Expose an API for the backend to fetch recommendations
-app.get('/recommendations', async (req, res) => {
-  const query = req.query.query;
-
-  if (!query) {
-    return res.status(400).json({ message: 'Query parameter is required' });
-  }
-
+  //console.log("channel id",req.body);
   try {
-    const [results] = await db.execute(
-      `SELECT title, author 
-       FROM books 
-       WHERE title LIKE ? OR author LIKE ? OR category LIKE ?
-       LIMIT 10`,
-      [`%${query}%`, `%${query}%`, `%${query}%`]
-    );
-
-    if (results.length === 0) {
-      return res.status(404).json({ message: `No recommendations found for "${query}"` });
+    const channel = client.channels.cache.get(channelId);
+    if (!channel) {
+      return res.status(404).json({ message: 'Channel not found.' });
     }
 
-    res.json(results);
-  } catch (error) {
-    console.error('Error fetching recommendations from the database:', error);
-    res.status(500).json({ message: 'Database error' });
+    await channel.send(message);
+    res.status(200).json({ message: 'Message sent successfully.' });
+  } catch (err) {
+    console.error('Error sending message via bot:', err);
+    res.status(500).json({ message: 'Failed to send message via bot.' });
   }
 });
 
+// app.post('/bot/post-message', (req, res) => {
+//   console.log('Request body:', req.body); // Should log the parsed JSON body
+//   res.status(200).json({ success: true });
+// });
+
+
+
+
+client.login(TOKEN);
 // Start the API server
 app.listen(PORT, () => {
   console.log(`Bot API running on http://localhost:${PORT}`);

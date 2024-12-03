@@ -5,6 +5,7 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mysql = require("mysql2");
+const axios = require('axios');
 
 const app = express();
 
@@ -121,7 +122,7 @@ app.get("/api/user-library/:userId", (req, res) => {
     const userId = req.params.userId;
   
     const sql = `
-      SELECT b.id, b.title, b.author, b.category, b.cover_image
+      SELECT b.id, b.title, b.author, b.category, b.cover_image, ul.review
       FROM user_library ul
       JOIN books b ON ul.book_id = b.id
       WHERE ul.user_id = ?
@@ -184,33 +185,123 @@ app.get('/api/search-books', (req, res) => {
     });
   });
 
-app.post('/api/add-to-library/:userId', (req, res) => {
-    const { bookId } = req.body;
-    const userId =req.params.userId;  
-  
-    const sql = 'INSERT INTO user_library (user_id, book_id) VALUES (?, ?)';
-    db.query(sql, [userId, bookId], (err, result) => {
-      if (err) {
-        console.error('Error adding book to library:', err);
-        return res.status(500).json({ message: 'Error adding book to library' });
+app.post('/api/add-to-library/:userId', async(req, res) => {
+    const  channelId  = req.body.channelId;
+    const userId =req.params.userId; 
+    console.log("channelId",channelId);
+    try {
+      const { data: books } = await axios.get(`http://localhost:5000/api/user-library/${userId}`);
+      if (books.length === 0) {
+        return res.status(404).json({ message: 'No books found for this user.' });
       }
-      res.json({ message: 'Book added to your library' });
-    });
-  });
-  app.get('/api/recommendations', async (req, res) => {
-    const query = req.query.query;
   
-    if (!query) {
-      return res.status(400).json({ message: 'Query parameter is required' });
+      const bookList = books
+        .map(book => `${book.id}. **${book.title}** by ${book.author} (Category: ${book.category})`)
+        .join('\n');
+  
+      // Send the message via bot
+      let content = {channelId,message: `📚 **User's Library:**\n${bookList}`};
+
+      // const botResponse = axios({
+      //   url: 'http://localhost:4000/bot/post-message',  
+      //   method: "post",
+      //   body: JSON.stringify(content)
+      // })
+      console.log("content",content);
+      const botResponse = await axios.post('http://localhost:4000/bot/post-message', content);
+      console.log("bot response",botResponse);
+      
+  
+      res.status(200).json({ message: 'Library posted to Discord.', botResponse: botResponse.data });
+    } catch (err) {
+      console.error('Error posting library to Discord:', err);
+      res.status(500).json({ message: 'Failed to post library to Discord.' });
     }
+    // const sql = 'INSERT INTO user_library (user_id, book_id) VALUES (?, ?)';
+    // db.query(sql, [userId, bookId], (err, result) => {
+    //   if (err) {
+    //     console.error('Error adding book to library:', err);
+    //     return res.status(500).json({ message: 'Error adding book to library' });
+    //   }
+    //   res.json({ message: 'Book added to your library' });
+    // });
+
+
+  });
+  // app.get('/api/recommendations', async (req, res) => {
+  //   const query = req.query.query;
+  
+  //   if (!query) {
+  //     return res.status(400).json({ message: 'Query parameter is required' });
+  //   }
+  
+  //   try {
+  //     const response = await axios.get(`http://localhost:4000/recommendations?query=${query}`);
+  
+  //     res.json(response);
+  //   } catch (err) {
+  //     console.error('Error fetching recommendations:', err);
+  //     res.status(500).json({ message: 'Database error' });
+  //   }
+  // });
+
+  app.post('/api/reviews/', async (req, res) => {
+    const { review } = req.body;
+    const bookId = req.query.bookId;
+    const userId = req.query.userId; 
+    console.log("review",review,bookId,userId)
   
     try {
-      const response = await axios.get(`http://localhost:4000/recommendations?query=${query}`);
+      // Check if the user already has a review for this book
+      const [existingReview] = await db.promise().query(
+        'SELECT * FROM user_library WHERE book_id = ? AND user_id = ?',
+        [bookId, userId]
+      );
   
-      res.json(response);
+      if (existingReview.length > 0) {
+        // If review exists, update it
+        await db.promise().query(
+          'UPDATE user_library SET review = ? WHERE book_id = ? AND user_id = ?',
+          [review, bookId, userId]
+        );
+        res.json({ success: true });
+      } else {
+       
+        await db.promise().query(
+          'INSERT INTO user_library (book_id, user_id, review) VALUES (?, ?, ?)',
+          [bookId, userId, review]
+        );
+        res.json({ success: true });
+      }
     } catch (err) {
-      console.error('Error fetching recommendations:', err);
-      res.status(500).json({ message: 'Database error' });
+      console.error('Error saving review:', err);
+      res.status(500).json({ error: 'Failed to save review' });
+    }
+  });
+  
+  app.delete('/api/library/', async (req, res) => {
+    console.log("req.query",req.query);
+    const bookId = req.query.bookId;
+    const userId = req.query.userId; 
+  
+    try {
+      const [existingEntry] = await db.promise().query(
+        'SELECT * FROM user_library WHERE book_id = ? AND user_id = ?',
+        [bookId, userId]
+      );
+  
+      if (existingEntry.length > 0) {
+        await db.promise().query(
+          'DELETE FROM user_library WHERE book_id = ? AND user_id = ?',
+          [bookId, userId]
+        );
+        res.json({ success: true, message: 'Book removed from library.' });
+      } else {
+        res.status(404).json({ success: false, message: 'Book not found in library.' });
+      }
+    } catch (err) {
+      console.error('Error removing book from library:', err);
+      res.status(500).json({ error: 'Failed to remove book from library.' });
     }
   });
   
