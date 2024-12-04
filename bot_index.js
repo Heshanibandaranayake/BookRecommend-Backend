@@ -1,10 +1,18 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits,REST,Routes } = require('discord.js');
 const express = require('express');
 const mysql = require('mysql2/promise');
 const axios = require('axios');
+const cors = require("cors");
+const jwt = require("jsonwebtoken");
+
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
+const clientId = process.env.DISCORD_CLIENT_ID;;  
+const guildId = process.env.DISCORD_GUILDE_ID;  
+const channelId = process.env.DISCORD_CHANNEL_ID;  
+
+const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 const client = new Client({
   intents: [
@@ -15,11 +23,12 @@ const client = new Client({
   ],
 });
 
+
 const app = express();
+app.use(cors());
 app.use(express.json());
 const PORT = process.env.BOT_API_PORT || 4000;
 
-// Database connection
 const db = mysql.createPool({
   host: "localhost",
   user: "root",
@@ -27,45 +36,95 @@ const db = mysql.createPool({
   database: "book_recommend_system",
 });
 
-// Discord bot login
+db.getConnection((err) => {
+  if (err) {
+    console.error("Database connection failed:", err);
+  } else {
+    console.log("Connected to the database.");
+  }
+});
+
 client.once('ready', () => {
   console.log(`Discord Bot is online as ${client.user.tag}`);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+client.login(TOKEN);
 
-app.post('/bot/post-message', async(req, res) => {
-  // console.log("bot req***",req.body);
-  // console.log('Headers:', req.headers);
-  // console.log('Body:', req.body); // This should print the JSON object
-  //res.status(200).json({ success: true });
-  const channelId = req.body.channelId;
-  const message = req.body.message;
-
-  //console.log("channel id",req.body);
+(async () => {
   try {
-    const channel = client.channels.cache.get(channelId);
-    if (!channel) {
-      return res.status(404).json({ message: 'Channel not found.' });
-    }
+    console.log('Fetching guild commands...');
+    const commands = await rest.get(
+      Routes.applicationGuildCommands(clientId, guildId)
+    );
+    console.log('Fetched commands:', commands);
+  } catch (error) {
+    console.error('Error fetching commands:', error);
+  }
+})();
 
-    await channel.send(message);
-    res.status(200).json({ message: 'Message sent successfully.' });
-  } catch (err) {
-    console.error('Error sending message via bot:', err);
-    res.status(500).json({ message: 'Failed to send message via bot.' });
+client.on('messageCreate', async (message) => {
+  // Ignore messages from the bot itself
+  if (message.author.bot) return;
+
+  // Parse the message
+  const [command, ...args] = message.content.trim().split(/\s+/);
+
+  try {
+    if (command === 'addbook') {
+      const bookId = args[0]; // Assume the first argument is the book ID
+      if (!bookId) {
+        return message.reply('Please provide a book ID. Usage: `addbook <bookId>`');
+      }
+
+      // Send request to backend
+      const response = await axios.post('http://localhost:5000/api/book', { 
+        command: 'addbook', 
+        bookId 
+      });
+
+      // Respond in Discord
+      message.reply(`Book with ID ${bookId} has been added.`);
+    } 
+    else if (command === 'deletebook') {
+      const bookId = args[0]; // Assume the first argument is the book ID
+      if (!bookId) {
+        return message.reply('Please provide a book ID. Usage: `deletebook <bookId>`');
+      }
+
+      // Send request to backend
+      const response = await axios.post('http://localhost:5000/api/book', { 
+        command: 'deletebook', 
+        bookId 
+      });
+
+      // Respond in Discord
+      message.reply(`Book with ID ${bookId} has been deleted.`);
+    } 
+    else if (command === 'viewbook') {
+      const bookId = args[0]; // Assume the first argument is the book ID
+      if (!bookId) {
+        return message.reply('Please provide a book ID. Usage: `viewbook <bookId>`');
+      }
+
+      // Send request to backend
+      const response = await axios.post('http://localhost:5000/api/book', { 
+        command: 'viewbook', 
+        bookId 
+      });
+
+      // Respond in Discord
+      message.reply(`Book with ID ${bookId} is being viewed.`);
+    } 
+    else {
+      message.reply('Unknown command. Available commands: `addbook`, `deletebook`, `viewbook`');
+    }
+  } catch (error) {
+    console.error('Error processing command:', error.message);
+    message.reply('Failed to process the command. Please try again.');
   }
 });
 
-// app.post('/bot/post-message', (req, res) => {
-//   console.log('Request body:', req.body); // Should log the parsed JSON body
-//   res.status(200).json({ success: true });
-// });
 
-
-
-
-client.login(TOKEN);
 // Start the API server
 app.listen(PORT, () => {
   console.log(`Bot API running on http://localhost:${PORT}`);
